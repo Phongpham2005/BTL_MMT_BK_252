@@ -106,35 +106,33 @@ class Request():
 
     def prepare(self, request, routes=None):
         """Prepares the entire request with the given parameters."""
+        # 1. Tách thô Header và Body từ request (dữ liệu thô)
+        # Sử dụng hàm fetch_headers_body bạn đã viết bên dưới
+        self._raw_headers, self._raw_body = self.fetch_headers_body(request)
 
-        # Prepare the request line from the request header
+        # 2. Phân tích Request Line (Method, Path, Version)
         print("[Request] prepare request missg {}".format(request))
-        self.method, self.path, self.version = self.extract_request_line(request)
+        self.method, self.path, self.version = self.extract_request_line(self._raw_headers)
         print("[Request] {} path {} version {}".format(self.method, self.path, self.version))
 
-        #
-        # @bksysnet Preapring the webapp hook with AsynapRous instance
-        # The default behaviour with HTTP server is empty routed
-        #
-        # TODO manage the webapp hook in this mounting point
-        #
-        
-        if not routes == {}:
+        # 3. Phân tích và gán giá trị cho self.headers (FIX LỖI NoneType TẠI ĐÂY)
+        # Gọi hàm prepare_headers để biến chuỗi thô thành CaseInsensitiveDict hoặc dict
+        from .dictionary import CaseInsensitiveDict
+        self.headers = CaseInsensitiveDict(self.prepare_headers(self._raw_headers))
+
+        # 4. Xử lý Routing cho WebApp (AsynapRous)
+        if routes and routes != {}:
             self.routes = routes
             print("[Request] Routing METHOD {} path {}".format(self.method, self.path))
             self.hook = routes.get((self.method, self.path))
-            print("[Request] Hook has request {}".format(request))
-            #
-            # self.hook manipulation goes here
-            # ...
-            #
+            # print("[Request] Hook has request {}".format(request))
 
-        self._raw_heaers = ""
-        self._raw_body =  ""
-        cookies = self.headers.get('cookie', '')
-            #
-            #  TODO: implement the cookie function here
-            #        by parsing the header            #
+        # 5. Bây giờ self.headers đã tồn tại, bạn có thể lấy Cookie an toàn
+        cookies_raw = self.headers.get('cookie', '')
+        if cookies_raw:
+            # Gọi hàm parse để biến chuỗi thành dict
+            self.cookies = self.prepare_cookies(cookies_raw)
+            print("[Request] Cookies detected: {}".format(self.cookies))
 
         return
 
@@ -161,8 +159,35 @@ class Request():
         #
         # TODO prepare the request authentication
         #
-	# self.auth = ...
-        return
+        """
+        Giải mã header Authorization (Basic Auth)
+        """
+        auth_header = self.headers.get('authorization', '')
+        if auth_header.startswith('Basic '):
+            import base64
+            # Lấy phần mã hóa sau chữ 'Basic '
+            encoded_credentials = auth_header.split(' ')[1]
+            # Giải mã sang chuỗi 'user:pass'
+            decoded_bytes = base64.b64decode(encoded_credentials)
+            decoded_str = decoded_bytes.decode('utf-8')
+            
+            # Tách user và pass
+            if ':' in decoded_str:
+                username, password = decoded_str.split(':', 1)
+                return username, password
+        return None, None
 
-    def prepare_cookies(self, cookies):
-            self.headers["Cookie"] = cookies
+    def prepare_cookies(self, cookies_raw):
+        """
+        Parses the raw Cookie header string into a dictionary.
+        Ví dụ: "id=1; name=thang" -> {'id': '1', 'name': 'thang'}
+        """
+        cookies_dict = {}
+        if cookies_raw:
+            # Tách các cặp cookie bằng dấu chấm phẩy
+            pairs = cookies_raw.split('; ')
+            for pair in pairs:
+                if '=' in pair:
+                    key, val = pair.split('=', 1)
+                    cookies_dict[key] = val
+        return cookies_dict

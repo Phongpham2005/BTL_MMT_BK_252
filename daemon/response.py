@@ -165,8 +165,15 @@ class Response():
             else:
                 handle_text_other(sub_type)
         elif main_type == 'image':
-            base_dir = BASE_DIR+"static/"
-            self.headers['Content-Type']='image/{}'.format(sub_type)
+            # Trỏ trực tiếp vào thư mục chứa ảnh để server tìm thấy welcome.png
+            base_dir = BASE_DIR + "static/" 
+            self.headers['Content-Type'] = 'image/{}'.format(sub_type)
+        elif main_type == 'video':
+            base_dir = BASE_DIR + "static/videos/"
+            self.headers['Content-Type'] = 'video/{}'.format(sub_type)
+        elif sub_type == 'csv' or sub_type == 'xml':
+            base_dir = BASE_DIR + "static/data/"
+            self.headers['Content-Type'] = '{}/{}'.format(main_type, sub_type)
         elif main_type == 'application':
             base_dir = BASE_DIR+"apps/"
             self.headers['Content-Type']='application/{}'.format(sub_type)
@@ -222,31 +229,9 @@ class Response():
         :params request (class:`Request <Request>`): incoming request object.
 
         :rtypes bytes: encoded HTTP response header.
+        Mốc 1: Triển khai Authentication & Cookies.
         """
-        reqhdr = request.headers
-        rsphdr = self.headers
-
-        #Build dynamic headers
-        headers = {
-                "Accept": "{}".format(reqhdr.get("Accept", "application/json")),
-                "Accept-Language": "{}".format(reqhdr.get("Accept-Language", "en-US,en;q=0.9")),
-                "Authorization": "{}".format(reqhdr.get("Authorization", "Basic <credentials>")),
-                "Cache-Control": "no-cache",
-                "Content-Type": "{}".format(self.headers['Content-Type']),
-                "Content-Length": "{}".format(len(self._content)),
-        #       "Cookie": "{}".format(reqhdr.get("Cookie", "sessionid=xyz789")), #dummy cooki
-        #
         # TODO prepare the request authentication
-        #
-        #       self.auth = ...
-                "Date": "{}".format(datetime.datetime.utcnow().strftime("%a, %d %b %Y %H:%M:%S GMT")),
-                "Max-Forward": "10",
-                "Pragma": "no-cache",
-                "Proxy-Authorization": "Basic dXNlcjpwYXNz",  # example base64
-                "Warning": "199 Miscellaneous warning",
-                "User-Agent": "{}".format(reqhdr.get("User-Agent", "Chrome/123.0.0.0")),
-            }
-
         # Header text alignment
             #
             #  TODO: implement the header building to create formated
@@ -256,9 +241,53 @@ class Response():
             # TODO prepare the request authentication
             #
             # self.auth = ...
+        # 1. Khởi tạo các biến cơ bản
+        reqhdr = request.headers
+        status_line = "HTTP/1.1 200 OK\r\n"
 
+        # Thông tin đăng nhập mẫu (admin:123 -> Basic YWRtaW46MTIz)
+        valid_credentials = "Basic YWRtaW46MTIz"
+        auth_header = reqhdr.get("authorization", "") # CaseInsensitiveDict giúp lấy key linh hoạt
+        user_session = request.cookies.get('sessionid') if request.cookies else None
+        target_session = "BK_THANG_2026"
 
-        return str(fmt_header).encode('utf-8')
+        #Build dynamic headers
+        # 2. XỬ LÝ AUTHENTICATION
+        # Nếu KHÔNG CÓ cookie hợp lệ VÀ CŨNG KHÔNG có user/pass đúng -> Bắt đăng nhập
+        if user_session != target_session and auth_header != valid_credentials:
+            status_line = "HTTP/1.1 401 Unauthorized\r\n"
+            self.headers["WWW-Authenticate"] = 'Basic realm="BK SmartHome Access"'
+            self._content = b"<html><body><h1>401 Unauthorized</h1><p>Vui long dang nhap.</p></body></html>"
+            
+        # 3. Nếu user vừa nhập user/pass đúng lần đầu -> Phát thêm Cookie cho họ
+        elif auth_header == valid_credentials:
+            self.headers["Set-Cookie"] = "sessionid={}; Path=/; HttpOnly".format(target_session)
+
+        # 4. TỔNG HỢP HEADERS DICTIONARY
+        # Gom các header hệ thống và các header tùy chỉnh (Auth, Cookie)
+        headers_dict = {
+            "Date": datetime.datetime.utcnow().strftime("%a, %d %b %Y %H:%M:%S GMT"),
+            "Server": "AsynapRous-BK-Core",
+            "Content-Type": self.headers.get('Content-Type', 'text/html'),
+            "Content-Length": str(len(self._content)),
+            "Connection": "keep-alive",
+        }
+
+        # Đưa các header đặc biệt vào danh sách nếu chúng tồn tại
+        if "WWW-Authenticate" in self.headers:
+            headers_dict["WWW-Authenticate"] = self.headers["WWW-Authenticate"]
+        if "Set-Cookie" in self.headers:
+            headers_dict["Set-Cookie"] = self.headers["Set-Cookie"]
+
+        # 5. PHẲNG HÓA THÀNH CHUỖI BYTES (Formatting)
+        fmt_header = status_line
+        for key, value in headers_dict.items():
+            fmt_header += "{}: {}\r\n".format(key, value)
+        
+        # Kết thúc header bằng một dòng trống (\r\n) theo đúng chuẩn HTTP
+        fmt_header += "\r\n"
+
+        return fmt_header.encode('utf-8')
 
 
     def build_notfound(self):
@@ -311,5 +340,7 @@ class Response():
         #
         else:
             return self.build_notfound()
+        _, self._content = self.build_content(path, base_dir)
+        self._header = self.build_response_header(request)
 
         return self._header + self._content

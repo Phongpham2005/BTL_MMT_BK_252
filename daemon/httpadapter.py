@@ -95,7 +95,7 @@ class HttpAdapter:
         :param addr (tuple): The client's address.
         :param routes (dict): The route mapping for dispatching requests.
         """
-
+        # 1. Nhận dữ liệu
         # Connection handler.
         self.conn = conn        
         # Connection address.
@@ -111,16 +111,27 @@ class HttpAdapter:
         print("[HttpAdapter] Invoke handle_client connection {}".format(addr))
 
         # Handle request hook
+        # 2. Xử lý Hook
         if req.hook:
-            #
-            # TODO: handle for App hook here
-            #
-            response = self.build_json_response(req, b"{}")
-        else: 
-            response = resp.build_response(req)
+            # 1. Lấy dữ liệu từ App
+            app_data = req.hook(req.headers, req.body) 
+            
+            # 2. Chuyển thành bytes (Giống logic nãy mình bàn)
+            if isinstance(app_data, bytes):
+                response_body = app_data
+            else:
+                import json
+                response_body = json.dumps(app_data).encode('utf-8')
 
-        #print("[HttpAdapter] Response content {}".format(response))
-        conn.sendall(response)
+            # 3. ĐÓNG GÓI THÀNH BYTES ĐỂ GỬI (GỌI HÀM MỚI TRONG RESPONSE)
+            # Vì self.response là đối tượng Response, ta gọi hàm build_json_header vừa thêm
+            final_response = self.response.build_json_header(req, response_body)
+        else: 
+            # Đối với file tĩnh (html, png), dùng build_response cũ
+            final_response = resp.build_response(req)
+
+        # 4. GỬI BYTES ĐI (Hết lỗi TypeError chắc chắn!)
+        conn.sendall(final_response)
         conn.close()
 
     async def handle_client_coroutine(self, reader, writer):
@@ -135,45 +146,45 @@ class HttpAdapter:
         :param addr (tuple): The client's address.
         :param routes (dict): The route mapping for dispatching requests.
         """
-        # 1. Lấy thông tin địa chỉ
-        # Request handler
-        req = self.request
-        # Response handler
-        resp = self.response
-
-        print("[HttpAdapter] Invoke handle_client_coroutine connection {})".format(addr))
-        addr = writer.get_extra_info("peername")
-
-        # 2. Đọc dữ liệu không chặn (Non-blocking read)
         # TODO Handle the request asynchronously
-        msg = await reader.read(1024)
-        data = await reader.read(4096) # Tăng buffer lên 4096 cho mượt
+        addr = writer.get_extra_info("peername")
+        print("[HttpAdapter] Invoke handle_client_coroutine connection {}".format(addr))
+
+        # 1. Đọc dữ liệu từ trình duyệt gửi lên
+        # Chỉ đọc 1 lần duy nhất để tránh treo connection
+        data = await reader.read(4096)
         if not data:
             writer.close()
             return
-        
-        # 3. Chuẩn bị request (Sử dụng routes được truyền từ backend)
-        req.prepare(data.decode("utf-8"), routes=self.routes)
 
-        # Handle request hook
-        # 4. Xử lý logic tương tự handle_client nhưng dùng await nếu cần
+        # 2. Chuẩn bị request (Truyền routes từ self.routes để biết đường gọi App)
+        self.request.prepare(data.decode("utf-8"), routes=self.routes)
+        req = self.request
+        resp = self.response
+
+        # 3. Xử lý logic thông qua Hook (App) hoặc file tĩnh
         if req.hook:
-            # Nếu hàm hook của bạn Thắng là hàm async (coroutine)
             if inspect.iscoroutinefunction(req.hook):
-                app_data = await req.hook(req)
+                app_data = await req.hook(req.headers, req.body)
             else:
-                app_data = req.hook(req)
+                app_data = req.hook(req.headers, req.body)
             
-            import json
-            json_str = json.dumps(app_data) if isinstance(app_data, (dict, list)) else app_data
-            response = self.build_json_response(req, json_str.encode('utf-8'))
+            # Đóng gói dữ liệu trả về thành JSON bytes
+            if isinstance(app_data, bytes):
+                response_bytes = self.build_json_response(req, app_data)
+            else:
+                import json
+                json_str = json.dumps(app_data)
+                response_bytes = self.build_json_response(req, json_str.encode('utf-8'))
         else:
-            # Trả về file tĩnh
-            response = resp.build_response(req)
+            # File tĩnh
+            response_bytes = resp.build_response(req)
 
-        # 5. Gửi dữ liệu và đóng kết nối
-        writer.write(response)
-        await writer.drain() # Đợi gửi xong mới tiếp tục
+        # 4. Gửi dữ liệu về cho khách hàng
+        writer.write(response_bytes)
+        await writer.drain() # Đảm bảo dữ liệu đã ra khỏi buffer mạng
+        
+        # 5. Đóng kết nối
         writer.close()
         await writer.wait_closed()
 

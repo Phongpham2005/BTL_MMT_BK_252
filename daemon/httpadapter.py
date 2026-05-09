@@ -95,7 +95,7 @@ class HttpAdapter:
         :param addr (tuple): The client's address.
         :param routes (dict): The route mapping for dispatching requests.
         """
-
+        # 1. Nhận dữ liệu
         # Connection handler.
         self.conn = conn        
         # Connection address.
@@ -111,14 +111,27 @@ class HttpAdapter:
         print("[HttpAdapter] Invoke handle_client connection {}".format(addr))
 
         # Handle request hook
+        # 2. Xử lý Hook
         if req.hook:
-            #
-            # TODO: handle for App hook here
-            #
-            response = ""
+            # 1. Lấy dữ liệu từ App
+            app_data = req.hook(req.headers, req.body) 
+            
+            # 2. Chuyển thành bytes (Giống logic nãy mình bàn)
+            if isinstance(app_data, bytes):
+                response_body = app_data
+            else:
+                import json
+                response_body = json.dumps(app_data).encode('utf-8')
 
-        #print("[HttpAdapter] Response content {}".format(response))
-        conn.sendall(response)
+            # 3. ĐÓNG GÓI THÀNH BYTES ĐỂ GỬI (GỌI HÀM MỚI TRONG RESPONSE)
+            # Vì self.response là đối tượng Response, ta gọi hàm build_json_header vừa thêm
+            final_response = self.response.build_json_header(req, response_body)
+        else: 
+            # Đối với file tĩnh (html, png), dùng build_response cũ
+            final_response = resp.build_response(req)
+
+        # 4. GỬI BYTES ĐI (Hết lỗi TypeError chắc chắn!)
+        conn.sendall(final_response)
         conn.close()
 
     async def handle_client_coroutine(self, reader, writer):
@@ -133,34 +146,47 @@ class HttpAdapter:
         :param addr (tuple): The client's address.
         :param routes (dict): The route mapping for dispatching requests.
         """
-        # Request handler
+        # TODO Handle the request asynchronously
+        addr = writer.get_extra_info("peername")
+        print("[HttpAdapter] Invoke handle_client_coroutine connection {}".format(addr))
+
+        # 1. Đọc dữ liệu từ trình duyệt gửi lên
+        # Chỉ đọc 1 lần duy nhất để tránh treo connection
+        data = await reader.read(4096)
+        if not data:
+            writer.close()
+            return
+
+        # 2. Chuẩn bị request (Truyền routes từ self.routes để biết đường gọi App)
+        self.request.prepare(data.decode("utf-8"), routes=self.routes)
         req = self.request
-        # Response handler
         resp = self.response
 
-        print("[HttpAdapter] Invoke handle_client_coroutine connection {})".format(addr))
-        addr = writer.get_extra_info("peername")
-
-        # TODO Handle the request asynchronously
-        msg = await reader.read(1024)
-
-
-        req.prepare(msg.decode("utf-8"), routes={})
-
-        # Handle request hook
+        # 3. Xử lý logic thông qua Hook (App) hoặc file tĩnh
         if req.hook:
-            #
-            # TODO: handle for App hook here
-            #
-            response = ""
+            if inspect.iscoroutinefunction(req.hook):
+                app_data = await req.hook(req.headers, req.body)
+            else:
+                app_data = req.hook(req.headers, req.body)
+            
+            # Đóng gói dữ liệu trả về thành JSON bytes
+            if isinstance(app_data, bytes):
+                response_bytes = self.build_json_response(req, app_data)
+            else:
+                import json
+                json_str = json.dumps(app_data)
+                response_bytes = self.build_json_response(req, json_str.encode('utf-8'))
+        else:
+            # File tĩnh
+            response_bytes = resp.build_response(req)
 
-        # Build response
-        #print("[HttpAdapter] Start **ASYNC** build_response with type {}".format(type(req)))
-        response = resp.build_response(req)
-
-        # Send all the response asynchronously
-        writer.write(response)
-        await writer.drain()
+        # 4. Gửi dữ liệu về cho khách hàng
+        writer.write(response_bytes)
+        await writer.drain() # Đảm bảo dữ liệu đã ra khỏi buffer mạng
+        
+        # 5. Đóng kết nối
+        writer.close()
+        await writer.wait_closed()
 
     @property
     def extract_cookies(self, req, resp):

@@ -86,3 +86,6 @@ def create_sampleapp(ip, port):
     app.prepare_address(ip, port)
     app.run()
 
+if __name__ == "__main__":
+    # Chạy thử trên localhost port 9000
+    create_sampleapp("127.0.0.1", 9000)

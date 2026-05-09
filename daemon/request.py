@@ -106,37 +106,25 @@ class Request():
 
     def prepare(self, request, routes=None):
         """Prepares the entire request with the given parameters."""
-
-        # Prepare the request line from the request header
-        print("[Request] prepare request missg {}".format(request))
-        self.method, self.path, self.version = self.extract_request_line(request)
-        print("[Request] {} path {} version {}".format(self.method, self.path, self.version))
-
-        #
-        # @bksysnet Preapring the webapp hook with AsynapRous instance
-        # The default behaviour with HTTP server is empty routed
-        #
-        # TODO manage the webapp hook in this mounting point
-        #
+        # 1. Tách Headers và Body (Dùng biến 'request' truyền vào)
+        parts = request.split('\r\n\r\n', 1)
+        header_section = parts[0]
         
-        if not routes == {}:
+        # Gán body: Luôn là chuỗi (thậm chí là rỗng) để App json.loads không bị crash
+        self.body = parts[1] if len(parts) > 1 else ""
+        
+        # Gán lại cho các biến tạm của Thắng nếu cần
+        self._raw_headers = header_section
+        self._raw_body = self.body
+
+        # 2. Phân tích Request Line
+        self.method, self.path, self.version = self.extract_request_line(self._raw_headers)
+        
+        # 4. Xử lý Routing (QUAN TRỌNG: method phải uppercase)
+        if routes:
             self.routes = routes
-            print("[Request] Routing METHOD {} path {}".format(self.method, self.path))
-            self.hook = routes.get((self.method, self.path))
-            print("[Request] Hook has request {}".format(request))
-            #
-            # self.hook manipulation goes here
-            # ...
-            #
-
-        self._raw_heaers = ""
-        self._raw_body =  ""
-        cookies = self.headers.get('cookie', '')
-            #
-            #  TODO: implement the cookie function here
-            #        by parsing the header            #
-
-        return
+            # Nên dùng .upper() để chắc chắn khớp với key trong AsynapRous
+            self.hook = routes.get((self.method.upper(), self.path))
 
     def prepare_body(self, data, files, json=None):
         self.prepare_content_length(self.body)
@@ -161,8 +149,46 @@ class Request():
         #
         # TODO prepare the request authentication
         #
-	# self.auth = ...
-        return
+        """
+        Giải mã header Authorization (Basic Auth)
+        """
+        auth_header = self.headers.get('authorization', '')
+        if auth_header.startswith('Basic '):
+            import base64
+            # Lấy phần mã hóa sau chữ 'Basic '
+            encoded_credentials = auth_header.split(' ')[1]
+            # Giải mã sang chuỗi 'user:pass'
+            decoded_bytes = base64.b64decode(encoded_credentials)
+            decoded_str = decoded_bytes.decode('utf-8')
+            
+            # Tách user và pass
+            if ':' in decoded_str:
+                username, password = decoded_str.split(':', 1)
+                return username, password
+        return None, None
 
-    def prepare_cookies(self, cookies):
-            self.headers["Cookie"] = cookies
+    def prepare_cookies(self, cookies_raw):
+        """
+        Parses the raw Cookie header string into a dictionary.
+        Ví dụ: "id=1; name=thang" -> {'id': '1', 'name': 'thang'}
+        """
+        cookies_dict = {}
+        if cookies_raw:
+            # Tách các cặp cookie bằng dấu chấm phẩy
+            pairs = cookies_raw.split('; ')
+            for pair in pairs:
+                if '=' in pair:
+                    key, val = pair.split('=', 1)
+                    cookies_dict[key] = val
+        return cookies_dict
+
+    def get_auth_credentials(self):
+        """Giải mã header Authorization từ Base64 sang văn bản thô."""
+        auth_header = self.headers.get('authorization', '')
+        if auth_header.startswith('Basic '):
+            import base64
+            encoded = auth_header.split(' ')[1]
+            decoded = base64.b64decode(encoded).decode('utf-8')
+            if ':' in decoded:
+                return decoded.split(':', 1) # Trả về [user, password]
+        return None, None

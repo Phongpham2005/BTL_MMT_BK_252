@@ -117,6 +117,18 @@ class HttpAdapter:
             app_data = req.hook(req.headers, req.body) 
             
             # 2. Chuyển thành bytes (Giống logic nãy mình bàn)
+            # 2. Nếu nó trả về một Coroutine (do hàm async def hello)
+            if inspect.iscoroutine(app_data):
+                # Chạy nó để lấy kết quả thật (Alice)
+                # Nếu app_data là Coroutine (lời hứa), ta phải ép nó chạy để lấy kết quả thật
+                try:
+                    loop = asyncio.get_event_loop()
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                app_data = loop.run_until_complete(app_data)
+
+            # --------------------------------------------
             if isinstance(app_data, bytes):
                 response_body = app_data
             else:

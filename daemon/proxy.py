@@ -105,7 +105,7 @@ def resolve_routing_policy(hostname, routes):
             # Use a dummy host to raise an invalid connection
             proxy_host = '127.0.0.1'
             proxy_port = '9000'
-        elif len(value) == 1:
+        elif len(proxy_map) == 1:
             proxy_host, proxy_port = proxy_map[0].split(":", 2)
         #elif: # apply the policy handling 
         #   proxy_map
@@ -199,6 +199,13 @@ def run_proxy(ip, port, routes):
             #        using multi-thread programming with the
             #        provided handle_client routine
             #
+            # Bước TODO: Tạo thread mới để xử lý khách hàng
+            client_thread = threading.Thread(
+                target=handle_client, 
+                args=(ip, port, conn, addr, routes)
+            )
+            client_thread.daemon = True # Đảm bảo thread tự đóng khi server tắt
+            client_thread.start()
     except socket.error as e:
       print("Socket error: {}".format(e))
 

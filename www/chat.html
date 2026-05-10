@@ -66,13 +66,13 @@
           
           <div class="panel">
               <div class="flex-row">
-                  <strong style="white-space: nowrap; width: 80px; text-align: left;">Create Channel</strong>
+                  <strong style="white-space: nowrap; width: 130px; text-align: left;">Create Channel</strong>
                   <input type="text" id="new-channel-name" class="input-field flex-grow" placeholder="Channel name...">
                   <input type="password" id="new-channel-pass" class="input-field flex-grow" placeholder="Password (Optional)">
                   <button class="btn" onclick="createNewChannel()">Create</button>
               </div>
               <div class="flex-row">
-                  <strong style="white-space: nowrap; width: 80px; text-align: left;">Join Channel:</strong>
+                  <strong style="white-space: nowrap; width: 130px; text-align: left;">Join Channel:</strong>
                   <select id="channel-select" class="input-field flex-grow" onchange="handleChannelChange()">
                       <option value="Global">Global</option>
                   </select>
@@ -161,7 +161,7 @@
         
         if (myJoinedChannels.includes(selected)) {
             currentActiveChannel = selected;
-            document.getElementById("channel-title").innerText = "Kênh chat: " + selected;
+            document.getElementById("channel-title").innerText = "Chat channel: " + selected;
             fetchMessages();
             return;
         }

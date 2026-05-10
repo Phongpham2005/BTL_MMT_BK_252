@@ -106,24 +106,36 @@ class Request():
 
     def prepare(self, request, routes=None):
         """Prepares the entire request with the given parameters."""
-        # 1. Tách Headers và Body (Dùng biến 'request' truyền vào)
+        # 0. Tránh lỗi khi client gửi request rỗng (khi trình duyệt ping socket)
+        if not request or request.strip() == "":
+            return
+
+        # 1. Tách Headers và Body
         parts = request.split('\r\n\r\n', 1)
         header_section = parts[0]
         
         # Gán body: Luôn là chuỗi (thậm chí là rỗng) để App json.loads không bị crash
         self.body = parts[1] if len(parts) > 1 else ""
         
-        # Gán lại cho các biến tạm của Thắng nếu cần
         self._raw_headers = header_section
         self._raw_body = self.body
 
-        # 2. Phân tích Request Line
+        # 2. Phân tích Request Line (Lấy Method, Path, Version)
         self.method, self.path, self.version = self.extract_request_line(self._raw_headers)
         
-        # 4. Xử lý Routing (QUAN TRỌNG: method phải uppercase)
-        if routes:
+        # 3. Phân tích Header và khởi tạo biến self.headers
+        # Sử dụng CaseInsensitiveDict để dễ dàng lấy key không phân biệt hoa/thường
+        raw_headers_dict = self.prepare_headers(self._raw_headers)
+        self.headers = CaseInsensitiveDict(raw_headers_dict)
+
+        # 4. Trích xuất Cookies từ Header vừa tạo
+        cookie_header = self.headers.get('cookie', '')
+        self.cookies = self.prepare_cookies(cookie_header)
+
+        # 5. Xử lý Routing (hook mapping)
+        if routes and self.method:
             self.routes = routes
-            # Nên dùng .upper() để chắc chắn khớp với key trong AsynapRous
+            # Method phải được viết hoa (GET, POST...) để khớp với AsynapRous
             self.hook = routes.get((self.method.upper(), self.path))
 
     def prepare_body(self, data, files, json=None):

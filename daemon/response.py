@@ -321,7 +321,7 @@ class Response():
         :rtype bytes: complete HTTP response using prepared headers and content.
         """
         print("[Response] Start build response with req {}".format(request))
-        path = request.path
+        path = request.path or "/"
         mime_type = self.get_mime_type(path)
         print("[Response] {} path {} mime_type {}".format(request.method, request.path, mime_type))
 
@@ -366,6 +366,8 @@ class Response():
             "Content-Type": "application/json",
             "Content-Length": str(len(json_bytes)),
             "Connection": "close", # Đóng luôn để Postman nhận xong là ngắt kết nối
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, GET, OPTIONS, PUT"
         }
 
         # 3. Phẳng hóa thành bytes

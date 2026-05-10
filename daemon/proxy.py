@@ -41,6 +41,33 @@ PROXY_PASS = {
     "app2.local": ('192.168.56.103', 9002),
 }
 
+ROUND_ROBIN_COUNTER = {}
+
+def resolve_routing_policy(hostname, routes):
+    global ROUND_ROBIN_COUNTER
+    
+    proxy_map, policy = routes.get(hostname, (['127.0.0.1:9000'], 'round-robin'))
+    proxy_host, proxy_port = '127.0.0.1', '9000'
+
+    if isinstance(proxy_map, list) and len(proxy_map) > 0:
+        if policy == 'round-robin':
+            # Khởi tạo bộ đếm cho hostname nếu chưa có
+            if hostname not in ROUND_ROBIN_COUNTER:
+                ROUND_ROBIN_COUNTER[hostname] = 0
+            
+            # Chia lấy dư để quay vòng (Round-Robin)
+            idx = ROUND_ROBIN_COUNTER[hostname] % len(proxy_map)
+            ROUND_ROBIN_COUNTER[hostname] += 1
+            
+            target = proxy_map[idx]
+        else:
+            target = proxy_map[0] # Fallback nếu policy khác
+            
+        proxy_host, proxy_port = target.split(":", 1)
+    elif isinstance(proxy_map, str):
+        proxy_host, proxy_port = proxy_map.split(":", 1)
+
+    return proxy_host, proxy_port
 
 def forward_request(host, port, request):
     """

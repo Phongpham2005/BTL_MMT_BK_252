@@ -64,12 +64,13 @@ def api_send_broadcast(headers, body):
             peers = tracker_data["peers"]
             channels_info = tracker_data["channels"]
             
-        # Lấy danh sách những người được cấp quyền trong kênh này
-        authorized_members = channels_info.get(channel, {}).get("members", [])
+        # Lấy thông tin của kênh hiện tại
+        channel_info = channels_info.get(channel, {})
+        authorized_members = channel_info.get("members", [])
+        is_private = channel_info.get("is_private", False)
             
         for peer_name, info in peers.items():
-            # Access Control: Chỉ gửi nếu peer đó nằm trong danh sách authorized_members
-            if peer_name != my_username and (channel == "Global" or peer_name in authorized_members): 
+            if peer_name != my_username and (not is_private or peer_name in authorized_members): 
                 p2p_url = f"http://{info['ip']}:{info['port']}/broadcast-peer"
                 payload = json.dumps({
                     "sender": my_username, 
@@ -80,6 +81,7 @@ def api_send_broadcast(headers, body):
                 p2p_req = urllib.request.Request(p2p_url, data=payload, method='POST')
                 urllib.request.urlopen(p2p_req) 
                 
+        # Tự lưu vào lịch sử của mình
         message_history.append({"sender": my_username, "message": msg, "type": "broadcast", "channel": channel})
         return {"status": "success"}
     except Exception as e:

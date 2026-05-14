@@ -22,8 +22,8 @@ if __name__ == "__main__":
         print("[*] Đang khởi động Peer 2 (Cổng 8002)...")
         p_peer2 = subprocess.Popen([sys.executable, "-c", "from apps.peer_app import create_peer; create_peer('0.0.0.0', 8002)"])
 
-        # print("[*] Đang khởi động Peer 3 (Cổng 8003)...")
-        # p_peer3 = subprocess.Popen([sys.executable, "-c", "from apps.peer_app import create_peer; create_peer('0.0.0.0', 8003)"])
+        print("[*] Đang khởi động Peer 3 (Cổng 8003)...")
+        p_peer3 = subprocess.Popen([sys.executable, "-c", "from apps.peer_app import create_peer; create_peer('0.0.0.0', 8003)"])
 
         time.sleep(1.5)
 
@@ -31,13 +31,14 @@ if __name__ == "__main__":
         print("✅ HỆ THỐNG ĐÃ SẴN SÀNG HOẠT ĐỘNG!")
         print("👉 Máy 1: http://127.0.0.1:8001/chat.html")
         print("👉 Máy 2: http://127.0.0.1:8002/chat.html")
-        # print("👉 Máy 3: http://127.0.0.1:8003/chat.html")
+        print("👉 Máy 3: http://127.0.0.1:8003/chat.html")
         print("="*60 + "\n")
 
         # Tự động mở trình duyệt
         webbrowser.open("http://127.0.0.1:8001/chat.html")
         time.sleep(1)
         webbrowser.open("http://127.0.0.1:8002/chat.html")
+
         time.sleep(1)
         # webbrowser.open("http://127.0.0.1:8003/chat.html")
 
@@ -53,4 +54,5 @@ if __name__ == "__main__":
         p_tracker.terminate()
         p_peer1.terminate()
         p_peer2.terminate()
+        p_peer3.terminate() 
         sys.exit(0)

@@ -134,6 +134,14 @@
                 <button class="btn" onclick="sendBroadcast()">Send</button>
             </div>
         </main>
+        <aside class="sidebar-right" style="width: 250px; background-color: var(--bg-sidebar); border-left: 1px solid var(--border-color); padding: 15px;">
+            <div class="sidebar-section">
+                <span class="section-title">Members Online</span>
+                <div id="online-users-list">
+                    <!-- Danh sách user sẽ render ở đây -->
+                </div>
+            </div>
+        </aside>
     </div>
 
     <script>
@@ -197,6 +205,8 @@
             try {
                 const res = await fetch(`${TRACKER_URL}/get-list`);
                 const data = await res.json();
+                
+                // 1. Xử lý danh sách Channel (Nhóm chat)
                 channelData = data.channels;
                 const list = document.getElementById("channel-list-items");
                 list.innerHTML = "";
@@ -210,7 +220,27 @@
                     if (unreadCounts[ch] > 0) div.innerHTML += `<span class="unread-badge">${unreadCounts[ch]}</span>`;
                     list.appendChild(div);
                 }
-            } catch (e) {}
+
+                // 2. Xử lý danh sách User Online (Thanh bên phải)
+                const userList = document.getElementById("online-users-list");
+                userList.innerHTML = ""; 
+
+                // Duyệt qua data.peers trích xuất từ dữ liệu vừa lấy về
+                for (let peerName in data.peers) {
+                    const div = document.createElement("div");
+                    div.className = "channel-item"; 
+                    
+                    // Nếu là chính mình thì hiện màu khác hoặc chữ (You) cho dễ phân biệt
+                    let displayName = peerName === myName ? `${peerName} (You)` : peerName;
+                    let color = peerName === myName ? "var(--accent)" : "#31a24c"; // Màu xanh lá cho người khác online
+                    
+                    div.innerHTML = `<span style="color: ${color}">●</span> <span style="margin-left: 8px">${displayName}</span>`; 
+                    userList.appendChild(div);
+                }
+
+            } catch (e) {
+                console.log("Error updating data from tracker:", e);
+            }
         }
 
         async function switchChannel(name) {

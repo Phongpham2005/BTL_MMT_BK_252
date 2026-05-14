@@ -276,7 +276,7 @@
             const input = document.getElementById("chat-input");
             const msg = input.value;
             if (!msg.trim()) return;
-            await fetch("/api/send-broadcast", {
+            await fetch("/send-broadcast", {
                 method: "POST",
                 body: JSON.stringify({ message: msg, channel: currentChannel })
             });

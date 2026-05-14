@@ -49,7 +49,7 @@ def broadcast_peer(headers, body):
     })
     return {"status": "success"}
 
-@app.route('/api/send-broadcast', methods=['POST'])
+@app.route('/send-broadcast', methods=['POST'])
 def api_send_broadcast(headers, body):
     data = json.loads(body)
     msg = data.get("message")

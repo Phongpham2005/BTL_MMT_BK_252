@@ -22,8 +22,8 @@ if __name__ == "__main__":
         print("[*] Đang khởi động Peer 2 (Cổng 8002)...")
         p_peer2 = subprocess.Popen([sys.executable, "-c", "from apps.peer_app import create_peer; create_peer('0.0.0.0', 8002)"])
 
-        print("[*] Đang khởi động Peer 3 (Cổng 8003)...")
-        p_peer3 = subprocess.Popen([sys.executable, "-c", "from apps.peer_app import create_peer; create_peer('0.0.0.0', 8003)"])
+        # print("[*] Đang khởi động Peer 3 (Cổng 8003)...")
+        # p_peer3 = subprocess.Popen([sys.executable, "-c", "from apps.peer_app import create_peer; create_peer('0.0.0.0', 8003)"])
 
         time.sleep(1.5)
 
@@ -54,5 +54,5 @@ if __name__ == "__main__":
         p_tracker.terminate()
         p_peer1.terminate()
         p_peer2.terminate()
-        p_peer3.terminate() 
+        # p_peer3.terminate() 
         sys.exit(0)

@@ -1,97 +1,107 @@
 import json
+import os
+import urllib.parse
 import urllib.request
 from daemon import AsynapRous
 
 app = AsynapRous()
-
 my_username = ""
 message_history = []
+
+DB_DIR = "json"
+DB_FILE = os.path.join(DB_DIR, "users.json")
+
+
+def load_db():
+
+    if not os.path.exists(DB_DIR):
+        os.makedirs(DB_DIR)
+        
+    if not os.path.exists(DB_FILE): 
+
+        default_db = {"admin": "123"}
+        save_db(default_db)
+        return default_db
+        
+    with open(DB_FILE, "r", encoding="utf-8") as f: 
+        return json.load(f)
+
+def save_db(db):
+    if not os.path.exists(DB_DIR):
+        os.makedirs(DB_DIR)
+    with open(DB_FILE, "w", encoding="utf-8") as f: 
+        json.dump(db, f, indent=4) 
+
+users_db = load_db()
+
+@app.route('/register', methods=['POST'])
+def register(headers, body):
+    params = urllib.parse.parse_qs(body)
+    u, p = params.get("username", [""])[0], params.get("password", [""])[0]
+    db = load_db()
+    if u in db: return {"status": "error", "message": "Account exists!"}
+    db[u] = p
+    save_db(db)
+    return {"status": "success"}
 
 @app.route('/login', methods=['POST'])
 def login(headers, body):
     global my_username
-    data = json.loads(body)
-    my_username = data.get("username")
+    params = urllib.parse.parse_qs(body)
+    u, p = params.get("username", [""])[0], params.get("password", [""])[0]
+    db = load_db()
+
+    # 1. Check credentials
+    if db.get(u) != p:
+        return {"status": "error", "message": "Invalid credentials!"}
+
+    # 2. Check if already Online via Tracker
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:9000/get-list") as resp:
+            data = json.loads(resp.read().decode())
+            if u in data.get("peers", {}):
+                return {"status": "error", "message": "This account is already logged in elsewhere!"}
+    except: pass # If tracker is down, allow local login
+
+    my_username = u
     return {"status": "success"}
 
-@app.route('/connect-peer', methods=['POST'])
-def connect_peer(headers, body):
-    data = json.loads(body)
-    peer_name = data.get("peer_name")
-    print(f"\n[P2P] Connection established with {peer_name}")
-    return {"status": "success", "message": "Connected"}
-
-@app.route('/send-peer', methods=['POST'])
-def send_peer(headers, body):
-    data = json.loads(body)
-    sender = data.get("sender")
-    message_history.append({
-        "sender": sender, 
-        "message": data.get("message"), 
-        "type": "direct",
-        "channel": "Private" # Đánh dấu là tin nhắn riêng
-    })
+@app.route('/logout', methods=['POST'])
+def logout(headers, body):
+    global my_username
+    my_username = ""
     return {"status": "success"}
 
 @app.route('/broadcast-peer', methods=['POST'])
 def broadcast_peer(headers, body):
     data = json.loads(body)
-    sender = data.get("sender")
-    channel = data.get("channel", "Global")
-    msg = data.get("message")
-    
-    # Lưu rõ tên kênh (channel) vào lịch sử
-    message_history.append({
-        "sender": sender, 
-        "message": msg, 
-        "type": "broadcast",
-        "channel": channel
-    })
+    message_history.append({"sender": data.get("sender"), "message": data.get("message"), "type": "broadcast", "channel": data.get("channel")})
     return {"status": "success"}
 
 @app.route('/send-broadcast', methods=['POST'])
 def api_send_broadcast(headers, body):
     data = json.loads(body)
-    msg = data.get("message")
-    channel = data.get("channel", "Global")
-    tracker_url = "http://127.0.0.1:9000/get-list" 
-    
+    msg, channel = data.get("message"), data.get("channel", "Global")
     try:
-        import urllib.request
-        req = urllib.request.Request(tracker_url, method='GET')
-        with urllib.request.urlopen(req) as response:
-            tracker_data = json.loads(response.read().decode())
-            peers = tracker_data["peers"]
-            channels_info = tracker_data["channels"]
-            
-        # Lấy thông tin của kênh hiện tại
-        channel_info = channels_info.get(channel, {})
-        authorized_members = channel_info.get("members", [])
-        is_private = channel_info.get("is_private", False)
-            
-        for peer_name, info in peers.items():
-            if peer_name != my_username and (not is_private or peer_name in authorized_members): 
+        with urllib.request.urlopen("http://127.0.0.1:9000/get-list") as resp:
+            t_data = json.loads(resp.read().decode())
+            online_peers = t_data["peers"]
+            chan_info = t_data["channels"].get(channel, {})
+            members, is_private = chan_info.get("members", []), chan_info.get("is_private", False)
+
+        for name, info in online_peers.items():
+            if name != my_username and (not is_private or name in members):
                 p2p_url = f"http://{info['ip']}:{info['port']}/broadcast-peer"
-                payload = json.dumps({
-                    "sender": my_username, 
-                    "message": msg, 
-                    "channel": channel
-                }).encode('utf-8')
-                
-                p2p_req = urllib.request.Request(p2p_url, data=payload, method='POST')
-                urllib.request.urlopen(p2p_req) 
-                
-        # Tự lưu vào lịch sử của mình
+                p_data = json.dumps({"sender": my_username, "message": msg, "channel": channel}).encode()
+                urllib.request.urlopen(urllib.request.Request(p2p_url, data=p_data, method='POST'))
+        
         message_history.append({"sender": my_username, "message": msg, "type": "broadcast", "channel": channel})
         return {"status": "success"}
-    except Exception as e:
-        print(f"Broadcast Error: {e}")
-        return {"status": "error"}
+    except: return {"status": "error"}
 
 @app.route('/get-messages', methods=['GET'])
 def get_messages(headers, body):
     return {"messages": message_history}
 
 def create_peer(ip, port):
-    app.prepare_address(ip, port)
-    app.run()
+    app.prepare_address(ip, port); app.run()

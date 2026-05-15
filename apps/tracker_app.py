@@ -1,66 +1,100 @@
 import json
+import os
 from daemon import AsynapRous
 
 app = AsynapRous()
+active_peers = {} 
+CHANNELS_FILE = os.path.join("json", "channels.json")
 
-active_peers = {}
-# Cấu trúc mới: Lưu mật khẩu và danh sách thành viên đã được duyệt
-active_channels = {
-    "Global": {"password": "", "members": []} 
-}
+def load_channels():
+    if not os.path.exists("json"): os.makedirs("json")
+    if not os.path.exists(CHANNELS_FILE):
+        return {"Global": {"password": "", "members": [], "creator": "System"}}
+    with open(CHANNELS_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
 
-@app.route('/submit-info', methods=['POST'])
-def submit_info(headers, body):
-    data = json.loads(body)
-    username = data.get("username")
-    active_peers[username] = {"ip": data.get("ip"), "port": data.get("port")}
-    print(f"[Tracker] Peer {username} joined.")
-    return {"status": "success"}
+def save_channels(data):
+    with open(CHANNELS_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4)
+
+active_channels = load_channels()
 
 @app.route('/add-list', methods=['POST'])
 def add_list(headers, body):
     data = json.loads(body)
-    channel_name = data.get("channel_name")
-    password = data.get("password", "")
-    creator = data.get("creator")
-
-    if channel_name and channel_name not in active_channels:
-        # Khởi tạo kênh mới, thêm luôn người tạo vào danh sách members
-        active_channels[channel_name] = {"password": password, "members": [creator]}
-        print(f"[Tracker] Tạo kênh: {channel_name} (Private: {bool(password)})")
+    name, password, creator = data.get("channel_name"), data.get("password", ""), data.get("creator")
+    if name and name not in active_channels:
+  
+        active_channels[name] = {"password": password, "members": [creator], "creator": creator}
+        save_channels(active_channels)
         return {"status": "success"}
     return {"status": "error", "message": "Channel already exists!"}
 
-@app.route('/join-channel', methods=['POST'])
-def join_channel(headers, body):
-    """API mới để kiểm tra quyền truy cập (Access Control)"""
+@app.route('/delete-channel', methods=['POST'])
+def delete_channel(headers, body):
     data = json.loads(body)
-    username = data.get("username")
-    channel_name = data.get("channel_name")
-    password = data.get("password", "")
+    u, name = data.get("username"), data.get("channel_name")
+    if name in active_channels and name != "Global":
 
-    if channel_name in active_channels:
-        ch_info = active_channels[channel_name]
-        # Kiểm tra chính sách truy cập: Kênh public hoặc mật khẩu phải đúng
-        if ch_info["password"] == "" or ch_info["password"] == password:
-            if username not in ch_info["members"]:
-                ch_info["members"].append(username)
+        if active_channels[name].get("creator") == u:
+            del active_channels[name]
+            save_channels(active_channels)
+            print(f"[Tracker] Channel {name} deleted by creator {u}")
             return {"status": "success"}
-        else:
-            return {"status": "error", "message": "Incorrect access password!"}
-    return {"status": "error", "message": "Channel does not exist!"}
+    return {"status": "error", "message": "Unauthorized or channel not found"}
 
 @app.route('/get-list', methods=['GET'])
 def get_list(headers, body):
-    # Ẩn mật khẩu thực sự trước khi gửi cho các Peer để bảo mật
-    safe_channels = {}
-    for ch, info in active_channels.items():
-        safe_channels[ch] = {
-            "is_private": bool(info["password"]),
-            "members": info["members"]
-        }
-    return {"status": "success", "peers": active_peers, "channels": safe_channels}
+    safe_ch = {ch: {
+        "is_private": bool(info["password"]), 
+        "members": info["members"],
+        "creator": info.get("creator", "") 
+    } for ch, info in active_channels.items()}
+    return {"status": "success", "peers": active_peers, "channels": safe_ch}
+
+
+@app.route('/submit-info', methods=['POST'])
+def submit_info(headers, body):
+    data = json.loads(body); u = data.get("username")
+    active_peers[u] = {"ip": data.get("ip"), "port": data.get("port")}
+    if u not in active_channels["Global"]["members"]:
+        active_channels["Global"]["members"].append(u); save_channels(active_channels)
+    return {"status": "success"}
+
+@app.route('/unregister', methods=['POST'])
+def unregister(headers, body):
+    try:
+
+        if body:
+            data = json.loads(body)
+            u = data.get("username")
+            if u and u in active_peers: 
+                del active_peers[u]
+                print(f"[Tracker] User {u} logged out successfully.")
+    except Exception as e:
+        print(f"[Tracker] Unregister error: {e}")
+        
+    return {"status": "success"}
+
+@app.route('/join-channel', methods=['POST'])
+def join_channel(headers, body):
+    data = json.loads(body); u, name, pwd = data.get("username"), data.get("channel_name"), data.get("password", "")
+    if name in active_channels:
+        ch = active_channels[name]
+        if u in ch["members"] or ch["password"] == "" or ch["password"] == pwd:
+            if u not in ch["members"]: ch["members"].append(u); save_channels(active_channels)
+            return {"status": "success"}
+        return {"status": "error", "message": "Invalid password!"}
+    return {"status": "error", "message": "Channel not found!"}
+
+@app.route('/leave-channel', methods=['POST'])
+def leave_channel(headers, body):
+    data = json.loads(body); u, name = data.get("username"), data.get("channel_name")
+    if name in active_channels and name != "Global":
+        if u in active_channels[name]["members"]:
+            active_channels[name]["members"].remove(u); save_channels(active_channels)
+            return {"status": "success"}
+    return {"status": "error"}
 
 def create_tracker(ip, port):
-    app.prepare_address(ip, port)
-    app.run()
+    app.prepare_address(ip, port); app.run()

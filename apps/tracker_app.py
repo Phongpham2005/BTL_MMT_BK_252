@@ -97,4 +97,8 @@ def leave_channel(headers, body):
     return {"status": "error"}
 
 def create_tracker(ip, port):
-    app.prepare_address(ip, port); app.run()
+    try:
+        app.prepare_address(ip, port)
+        app.run()
+    except KeyboardInterrupt:
+        print("\n[Tracker] Server stopped by user request.")

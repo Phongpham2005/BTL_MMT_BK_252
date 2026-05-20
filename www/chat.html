@@ -91,13 +91,44 @@
         let currentChannel = "Global"; 
         const TRACKER = "http://127.0.0.1:9000";
         let syncTimer = null;
+        let cachedChannels = {};
 
         async function sync() {
+            syncTracker();
+            syncMessages();
+        }
+
+        // Luồng 1: Chỉ chuyên trách đồng bộ danh sách phòng và thành viên từ Tracker
+        async function syncTracker() {
             try {
-                const res = await fetch(`${TRACKER}/get-list`);
+                // ÉP TIMEOUT (1000ms): Đảm bảo các luồng chạy ngầm không bị kẹt khi tracker sập
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 1000);
+                
+                const res = await fetch(`${TRACKER}/get-list`, { signal: controller.signal });
+                clearTimeout(timeoutId);
+
                 const data = await res.json();
                 
-                // CHECK IF CHANNEL DELETED (For Members)
+                document.title = "Hybrid P2P Chat   ";
+
+                if (data.peers && !data.peers[myName]) {
+                    await fetch(`${TRACKER}/submit-info`, { 
+                        method: "POST", 
+                        body: JSON.stringify({username: myName, ip: "127.0.0.1", port: parseInt(location.port)})
+                    });
+                }
+
+                if (cachedChannels) {
+                    Object.keys(cachedChannels).forEach(ch => {
+                        if (ch !== "Global" && !data.channels[ch]) {
+                            fetch("/clear-messages", { method: "POST", body: JSON.stringify({channel: ch}) });
+                        }
+                    });
+                }
+
+                cachedChannels = data.channels;
+
                 if (currentChannel !== "Global" && !data.channels[currentChannel]) {
                     alert("Channel has been deleted.");
                     currentChannel = "Global";
@@ -105,18 +136,17 @@
                     sync(); return;
                 }
 
-                // 1. Sidebar Channels
                 document.getElementById('channel-list').innerHTML = Object.keys(data.channels).map(ch => `
                     <div onclick="joinChannel('${ch}')" style="padding:10px; cursor:pointer; border-radius:5px; margin-bottom:5px; background:${ch===currentChannel?'#3a3b3c':''}">
                         # ${ch} ${data.channels[ch].is_private ? '🔒' : ''}
                     </div>
                 `).join('');
 
-                // 2. Member List with ( Creator ) tag
                 const chData = data.channels[currentChannel];
                 const members = chData?.members || [];
                 const creator = chData?.creator || "";
                 const onlinePeers = Object.keys(data.peers);
+                
                 document.getElementById('member-list').innerHTML = members.map(m => `
                     <div style="font-size:13px; margin-bottom:10px">
                         <span style="color:${onlinePeers.includes(m)?'#31a24c':'#888'}">●</span> 
@@ -124,7 +154,6 @@
                     </div>
                 `).join('');
 
-                // 3. Action Button (Leave vs Delete)
                 const container = document.getElementById('action-btn-container');
                 if(currentChannel !== "Global") {
                     if (creator === myName) {
@@ -134,15 +163,68 @@
                     }
                 } else { container.innerHTML = ""; }
 
-                // 4. Messages
+            } catch (e) {
+                // Tracker sập: Giữ nguyên UI thành viên, chỉ đổi title cảnh báo, không chặn luồng tin nhắn
+                document.title = "Hybrid P2P Chat | Pure P2P Mode (Tracker Offline)";
+                if (cachedChannels) {
+                    document.getElementById('channel-list').innerHTML = Object.keys(cachedChannels).map(ch => `
+                        <div onclick="joinChannel('${ch}')" style="padding:10px; cursor:pointer; border-radius:5px; margin-bottom:5px; background:${ch===currentChannel?'#3a3b3c':''}">
+                            # ${ch} ${cachedChannels[ch].is_private ? '🔒' : ''}
+                        </div>
+                    `).join('');
+
+                    const container = document.getElementById('action-btn-container');
+                    if (currentChannel === "Global") {
+                        container.innerHTML = "";
+                    } else {
+                        const chData = cachedChannels[currentChannel];
+                        if (chData) {
+                            if (chData.creator === myName) {
+                                container.innerHTML = `<span class="action-btn btn-delete" onclick="handleDeleteChannel()">Delete Channel</span>`;
+                            } else {
+                                container.innerHTML = `<span class="action-btn btn-leave" onclick="handleLeaveChannel()">Leave</span>`;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Luồng 2: Chỉ chuyên trách lấy tin nhắn từ chính Peer cục bộ
+        async function syncMessages() {
+            try {
                 const mRes = await fetch("/get-messages");
                 const mData = await mRes.json();
-                document.getElementById('msg-box').innerHTML = mData.messages
-                    .filter(m => m.channel === currentChannel)
-                    .map(m => `<div style="margin-bottom:12px; text-align:${m.sender===myName?'right':'left'}">
-                        <div style="background:${m.sender===myName?'#0084ff':'#3a3b3c'}; padding:8px 14px; border-radius:15px; display:inline-block; max-width:70%">${m.message}</div>
-                    </div>`).join('');
-            } catch (e) {}
+                
+                const filteredMessages = mData.messages.filter(m => m.channel === currentChannel);
+                document.getElementById('msg-box').innerHTML = filteredMessages.map((m, index) => {
+                    const isOwnMessage = m.sender === myName;
+                    const msgTime = m.time || ""; 
+                    const showSenderName = index === 0 || filteredMessages[index - 1].sender !== m.sender;
+                    const isLastInChain = index === filteredMessages.length - 1 || filteredMessages[index + 1].sender !== m.sender;
+                    const marginBottom = isLastInChain ? '16px' : '4px';
+
+                    return `
+                        <div style="margin-bottom: ${marginBottom}; text-align: ${isOwnMessage ? 'right' : 'left'}">
+                            ${showSenderName ? `
+                                <div style="font-size: 11px; color: var(--text-dim); margin-bottom: 3px; font-weight: bold; padding: 0 4px;">
+                                    ${isOwnMessage ? 'You' : m.sender}
+                                </div>
+                            ` : ''}
+                            <div style="display: inline-flex; align-items: flex-end; gap: 6px; flex-direction: ${isOwnMessage ? 'row-reverse' : 'row'}; max-width: 70%;">
+                                <div style="background: ${isOwnMessage ? 'var(--msg-own)' : 'var(--bg-item)'}; color: white; padding: 8px 14px; border-radius: 15px; word-wrap: break-word; text-align: left;">
+                                    ${m.message}
+                                </div>
+                                <span style="font-size: 10px; color: var(--text-dim); white-space: nowrap; margin-bottom: 2px;">
+                                    ${msgTime}
+                                </span>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } catch (e) {
+                console.error("Local P2P synchronization error: ", e);
+            }
         }
 
         async function handleLeaveChannel() {
@@ -157,7 +239,10 @@
                 method:"POST", body: JSON.stringify({username: myName, channel_name: currentChannel})
             });
             if((await res.json()).status === "success") {
-                currentChannel = "Global"; sync();
+                await fetch("/clear-messages", { method: "POST", body: JSON.stringify({channel: currentChannel}) });
+                
+                currentChannel = "Global"; 
+                sync();
             }
         }
 
@@ -189,16 +274,16 @@
             if(data.status === "success") {
                 myName = u;
                 await fetch(`${TRACKER}/submit-info`, { method:"POST", body: JSON.stringify({username:u, ip:"127.0.0.1", port:parseInt(location.port)})});
+                await fetch("/sync-history", { method: "POST" });
+
                 document.getElementById('login-view').style.display='none';
                 document.getElementById('app-container').style.display='flex';
                 document.getElementById('display-name').innerText = u;
 
                 sync(); 
                 syncTimer = setInterval(sync, 2000);
-                setInterval(sync, 2000);
             } else alert(data.message);
         }
-
         async function handleLogout() {
             if(!confirm("Are you sure you want to logout?")) return;
             clearInterval(syncTimer);
@@ -246,41 +331,82 @@
         }
 
         async function joinChannel(name) {
-            const resList = await fetch(`${TRACKER}/get-list`);
-            const dataList = await resList.json();
-            const ch = dataList.channels[name];
-            
-            // If already a member (checked via persistence or current session), join directly
-            if (ch.members.includes(myName)) {
+            if(name === currentChannel) return;
+
+            let isTrackerOnline = true;
+            try {
+                // ÉP TIMEOUT CỰC NHANH (300ms): Tránh bị khựng giao diện khi tracker sập
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 300);
+                
+                const ping = await fetch(`${TRACKER}/get-list`, { signal: controller.signal });
+                clearTimeout(timeoutId); // Nếu thành công trước 300ms thì huỷ bộ đếm
+
+                if (!ping.ok) throw new Error();
+                const dataList = await ping.json();
+                cachedChannels = dataList.channels; // Cập nhật bộ nhớ đệm
+            } catch (err) {
+                isTrackerOnline = false;
+            }
+
+            // TRƯỜNG HỢP 1: TRACKER ĐANG ONLINE
+            if (isTrackerOnline) {
+                const ch = cachedChannels[name];
+                if (!ch) return;
+
+                // Nếu đã là thành viên thì vào thẳng luôn không cần pass
+                if (ch.members && ch.members.includes(myName)) {
+                    const res = await fetch(`${TRACKER}/join-channel`, {
+                        method: "POST", body: JSON.stringify({username: myName, channel_name: name})
+                    });
+                    if((await res.json()).status === "success") {
+                        currentChannel = name;
+                        document.getElementById('active-ch-label').innerText = name;
+                        sync();
+                    }
+                    return;
+                }
+
+                // Nếu chưa là thành viên mà kênh Private thì hỏi Pass
+                let pass = "";
+                if(ch.is_private) {
+                    pass = prompt("Enter password for #" + name + ":");
+                    if(pass === null) return;
+                }
+
                 const res = await fetch(`${TRACKER}/join-channel`, {
-                    method: "POST", 
-                    body: JSON.stringify({username: myName, channel_name: name})
+                    method: "POST",
+                    body: JSON.stringify({username: myName, channel_name: name, password: pass})
                 });
-                if((await res.json()).status === "success") {
+                const data = await res.json();
+                if(data.status === "success") {
                     currentChannel = name;
                     document.getElementById('active-ch-label').innerText = name;
                     sync();
+                } else alert("Access Denied: " + data.message);
+            } 
+            
+            // TRƯỜNG HỢP 2: TRACKER ĐÃ TẮT (OFFLINE MODE)
+            else {
+                if (name !== "Global") {
+                    const ch = cachedChannels[name];
+                    if (!ch) {
+                        alert("Error: Channel information not found in local cache!");
+                        return;
+                    }
+                    // Nếu là kênh Private mà bản thân CHƯA tham gia thì chặn lại
+                    if (ch.is_private && (!ch.members || !ch.members.includes(myName))) {
+                        alert("Security Error: You have not joined this private channel before Tracker went offline. Cannot verify password offline!");
+                        return;
+                    }
                 }
-                return;
-            }
-
-            // Prompt for password if channel is private
-            let pass = "";
-            if(ch.is_private) {
-                pass = prompt("Enter password for #" + name + ":");
-                if(pass === null) return;
-            }
-
-            const res = await fetch(`${TRACKER}/join-channel`, {
-                method: "POST", 
-                body: JSON.stringify({username: myName, channel_name: name, password: pass})
-            });
-            const data = await res.json();
-            if(data.status === "success") {
+                
+                // Hợp lệ: Cho phép đổi kênh cục bộ
                 currentChannel = name;
                 document.getElementById('active-ch-label').innerText = name;
+                
                 sync();
-            } else alert("Access Denied: " + data.message);
+            }
         }
 
         async function sendMessage() {
@@ -288,7 +414,7 @@
             const msg = input.value.trim();
             if(!msg) return;
             
-            await fetch("/api/send-broadcast", {
+            await fetch("/send-broadcast", {
                 method: "POST",
                 body: JSON.stringify({message: msg, channel: currentChannel})
             });
@@ -297,8 +423,11 @@
         }
 
         // Allow 'Enter' key to send messages
-        document.getElementById("chat-input").addEventListener("keypress", (e) => {
-            if(e.key === "Enter") sendMessage();
+        document.getElementById("chat-input").addEventListener("keydown", (e) => {
+            if(e.key === "Enter") {
+                e.preventDefault(); 
+                sendMessage();
+            }
         });
     </script>
 </body>
